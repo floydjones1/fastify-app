@@ -1,5 +1,6 @@
 import fp from "fastify-plugin";
 import fastifyJwt from "fastify-jwt";
+import { fastifyRequestContextPlugin } from "fastify-request-context";
 import * as mongoose from "mongoose";
 import { UserSchema, User } from "../mongoose/schemas";
 
@@ -11,11 +12,19 @@ export interface SupportPluginOptions {
 // The use of fastify-plugin is required to be able
 // to export the decorators to the outer scope
 export default fp<SupportPluginOptions>(async (fastify, opts) => {
-  // console.log(opts)
-  // fastify.decorate('someSupport', function (foo: number) {
-  //   return 'hugs'
-  // })
-  fastify.register(fastifyJwt, { secret: "supersecret" });
+  fastify.register(fastifyRequestContextPlugin);
+
+  // setup jwt
+  fastify.register(fastifyJwt, {
+    secret: "supersecret",
+    sign: { expiresIn: "15 minute" },
+  });
+
+  fastify.decorate("generateJWT", (email: string) => {
+    return fastify.jwt.sign({ email });
+  });
+
+  // setup mongoose
   const db = await mongoose
     .connect("mongodb://root:example@localhost:27017", {
       dbName: "myDB",
@@ -23,6 +32,7 @@ export default fp<SupportPluginOptions>(async (fastify, opts) => {
     .then((conn) => {
       fastify.decorate("store", {
         User: conn.model("User", UserSchema),
+        db: conn,
       });
 
       return conn;
@@ -37,9 +47,16 @@ export default fp<SupportPluginOptions>(async (fastify, opts) => {
 // When using .decorate you have to specify added properties for Typescript
 declare module "fastify" {
   export interface FastifyInstance {
-    someSupport(): string;
+    generateJWT: (email: string) => string;
     store: {
       User: mongoose.Model<User>;
+      db: typeof mongoose;
     };
+  }
+}
+
+declare module "fastify-request-context" {
+  interface RequestContextData {
+    user: User;
   }
 }

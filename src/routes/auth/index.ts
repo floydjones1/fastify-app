@@ -1,28 +1,36 @@
 import { FastifyPluginAsync } from "fastify";
-import { RegisterRequest, User } from "./types";
-import { Static } from "@sinclair/typebox";
+import { LoginOpts, LoginBody, RegisterOpts, RegisterBody } from "./types";
 import * as bcrypt from "bcrypt";
 
 const saltRounds = 10;
 
-type RegisterRequest = Static<typeof RegisterRequest>;
-
 const example: FastifyPluginAsync = async (fastify, opts): Promise<void> => {
-  fastify.post("/login", async function (request, reply) {
-    return reply;
-  });
+  fastify.post<{ Body: LoginBody }>(
+    "/login",
+    LoginOpts,
+    async (request, reply) => {
+      const { email, password } = request.body;
+      const user = await fastify.store.User.findOne({ email }).exec();
+      if (!user) {
+        return reply.status(404).send();
+      }
 
-  fastify.post<{ Body: Static<typeof RegisterRequest> }>(
+      bcrypt.compare(password, user.password, (err, isValid) => {
+        if (err || !isValid)
+          return reply.getHttpError(401, "invalid credentials");
+
+        const token = fastify.generateJWT(user.email);
+        reply.status(200).send({ token, ...user.toObject() });
+      });
+
+      return reply;
+    }
+  );
+
+  fastify.post<{ Body: RegisterBody }>(
     "/register",
-    {
-      schema: {
-        body: RegisterRequest,
-        response: {
-          201: User,
-        },
-      },
-    },
-    async function (request, reply) {
+    RegisterOpts,
+    (request, reply) => {
       const { body } = request;
       const hashPass = bcrypt.hashSync(body.password, saltRounds);
       const user = new fastify.store.User({
@@ -31,11 +39,13 @@ const example: FastifyPluginAsync = async (fastify, opts): Promise<void> => {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
+
       user.save((err, res) => {
         if (err) {
           return reply.status(500).send(err.message);
         }
-        return reply.status(201).send(res);
+        const token = fastify.generateJWT(user.email);
+        return reply.status(201).send({ ...res, token });
       });
     }
   );
