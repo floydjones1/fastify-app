@@ -1,6 +1,7 @@
 import fp from "fastify-plugin";
 import fastifyJwt from "fastify-jwt";
-import mongo from "fastify-mongodb";
+import * as mongoose from "mongoose";
+import { UserSchema, User } from "../mongoose/schemas";
 
 export interface SupportPluginOptions {
   thing: string;
@@ -15,22 +16,30 @@ export default fp<SupportPluginOptions>(async (fastify, opts) => {
   //   return 'hugs'
   // })
   fastify.register(fastifyJwt, { secret: "supersecret" });
+  const db = await mongoose
+    .connect("mongodb://root:example@localhost:27017", {
+      dbName: "myDB",
+    })
+    .then((conn) => {
+      fastify.decorate("store", {
+        User: conn.model("User", UserSchema),
+      });
 
-  fastify.register(mongo, {
-    forceClose: true,
-    url: "mongodb://root:example@localhost:27017",
-    database: "database",
-    auth: {
-      password: "example",
-      username: "root",
-    },
-  });
+      return conn;
+    })
+    .catch(console.error);
+
+  if (!db) {
+    throw Error("cannot connect to database");
+  }
 });
 
 // When using .decorate you have to specify added properties for Typescript
 declare module "fastify" {
   export interface FastifyInstance {
     someSupport(): string;
-    // jwtVerify(): Function
+    store: {
+      User: mongoose.Model<User>;
+    };
   }
 }
